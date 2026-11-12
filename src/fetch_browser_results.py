@@ -1,11 +1,8 @@
-
 import json
-import shutil
-import subprocess
-import time
+from playwright.sync_api import sync_playwright
+from paths import RESULTS_FILE
 
-from paths import RESULTS_FILE, APP_DIR
-
+CDP_URL = "http://127.0.0.1:18800"
 
 JS = r"""() => {
     const bodyText = document.body?.innerText || "";
@@ -47,88 +44,83 @@ JS = r"""() => {
         }
     }
 
-    return JSON.stringify({
+    return {
         page_title: document.title,
         is_author_dashboard: /author dashboard/i.test(bodyText),
         found_manuscript_table: foundManuscriptTable,
         records
-    });
+    };
 }"""
 
 
 def main():
-    openclaw = shutil.which("openclaw")
+    with sync_playwright() as p:
+        browser = p.chromium.connect_over_cdp(CDP_URL)
 
-    if not openclaw:
-        raise RuntimeError(
-            "OpenClaw was not found. Install OpenClaw and make sure "
-            "its executable is available in PATH."
+        # Find the ScholarOne tab dynamically.
+        pages = [
+            page
+            for context in browser.contexts
+            for page in context.pages
+        ]
+
+        page = next(
+            (
+                pg for pg in pages
+                if "mc.manuscriptcentral.com/mksc" in pg.url
+            ),
+            None
         )
 
-    # First, navigate to the Author Dashboard.
-    navigation = subprocess.run(
-        [
-            openclaw,
-            "browser",
-            "evaluate",
-            "--fn",
-            """() => {
-                const link = [...document.querySelectorAll('a')]
-                    .find(a => (a.innerText || '').trim() === 'Author');
+        if page is None:
+            raise RuntimeError("ScholarOne tab not found.")
 
-                if (!link) return 'Author link not found';
+        print("ScholarOne tab found.")
+
+        # Navigate to the Author Dashboard.
+        clicked = page.evaluate("""
+            () => {
+                const link = [...document.querySelectorAll('a')]
+                    .find(a =>
+                        (a.innerText || '').trim() === 'Author'
+                    );
+
+                if (!link) return false;
 
                 link.click();
-                return 'Author navigation clicked';
-            }"""
-        ],
-        capture_output=True,
-        text=True,
-        cwd=str(APP_DIR.parent)
-    )
+                return true;
+            }
+        """)
 
-    if navigation.returncode != 0:
-        raise RuntimeError("Could not navigate to Author Dashboard.")
+        if not clicked:
+            raise RuntimeError("Author navigation link not found.")
 
-    # Wait for the dashboard to load.
-    time.sleep(3)
+        print("Author navigation clicked.")
+        page.wait_for_timeout(3000)
 
-    # Then extract manuscript information from the dashboard.
-    result = subprocess.run(
-        [openclaw, "browser", "evaluate", "--fn", JS],
-        capture_output=True,
-        text=True,
-        cwd=str(APP_DIR.parent)
-    )
+        # Extract manuscript information.
+        data = page.evaluate(JS)
 
-    if result.returncode != 0:
-        raise RuntimeError(f"Browser error: {result.stderr}")
+        if (
+            not data.get("found_manuscript_table")
+            and not data.get("is_author_dashboard")
+        ):
+            raise RuntimeError(
+                "Could not verify the ScholarOne Author Dashboard. "
+                "No results saved."
+            )
 
-    try:
-        response = json.loads(result.stdout.strip())
-        data = json.loads(response) if isinstance(response, str) else response
-    except (json.JSONDecodeError, TypeError) as e:
-        raise RuntimeError(
-            f"Could not parse browser response: {result.stdout}"
-        ) from e
+        records = data.get("records", [])
 
-    if not data.get("found_manuscript_table") and not data.get("is_author_dashboard"):
-        raise RuntimeError(
-            "Could not verify the ScholarOne Author Dashboard. "
-            "No results saved."
+        RESULTS_FILE.write_text(
+            json.dumps(records, indent=2),
+            encoding="utf-8"
         )
 
-    records = data.get("records", [])
-
-    RESULTS_FILE.write_text(
-        json.dumps(records, indent=2),
-        encoding="utf-8"
-    )
-
-    print(f"Page: {data.get('page_title')}")
-    print(f"Manuscripts found: {len(records)}")
-    print(f"Saved to: {RESULTS_FILE}")
-    print(json.dumps(records, indent=2))
+        print(f"Page: {data.get('page_title')}")
+        print(f"Manuscripts found: {len(records)}")
+        print(f"Saved to: {RESULTS_FILE}")
+        print(json.dumps(records, indent=2))
 
 
 if __name__ == "__main__":
