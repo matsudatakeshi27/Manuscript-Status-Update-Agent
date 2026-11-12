@@ -2,15 +2,19 @@
 
 An experimental local application that monitors manuscript submission statuses and sends email notifications when a manuscript's status changes.
 
-The application uses **OpenClaw for browser automation** and **Ollama for locally hosted AI models**. It is designed to run on users' own computers without requiring a paid AI API subscription.
+The application uses **OpenClaw for browser automation**, **Playwright for browser interaction**, and **Ollama for locally hosted AI models**. It is designed to run on users' own computers without requiring a paid AI API subscription.
 
 ## Overview
 
 The application helps researchers avoid manually checking manuscript submission websites.
 
 Features:
-- Retrieves manuscript information from submission websites using OpenClaw.
-- Uses a locally hosted AI model through Ollama.
+
+- Automatically starts the OpenClaw browser when needed.
+- Automatically opens the ScholarOne website.
+- Automatically logs into ScholarOne using credentials stored securely in macOS Keychain.
+- Automatically navigates to the Author Dashboard.
+- Retrieves manuscript information from submission websites.
 - Tracks manuscript IDs, titles, and statuses.
 - Detects changes in manuscript status.
 - Sends email notifications when an existing manuscript's status changes.
@@ -22,9 +26,11 @@ Features:
 This is an experimental prototype.
 
 Currently supported:
+
 - Operating system: macOS
 - Manuscript platform: ScholarOne
 - Browser automation: OpenClaw
+- Browser interaction: Playwright
 - Local AI models: Ollama
 - Tested model: Qwen3 8B (`qwen3:8b`)
 - Email notifications: Gmail SMTP
@@ -37,10 +43,11 @@ The application has not yet been fully tested on another computer.
 Users need to install:
 
 1. **Python** — runs the monitoring application.
-2. **OpenClaw** — controls the browser and retrieves manuscript information.
-3. **Ollama** — runs the AI model locally.
-4. **A supported browser** — used to access the manuscript submission website.
-5. **A Gmail account** — used to send email notifications.
+2. **OpenClaw** — manages the browser.
+3. **Playwright** — interacts with the browser.
+4. **Ollama** — runs the AI model locally.
+5. **A supported browser** — currently tested with Brave on macOS.
+6. **A Gmail account** — used to send email notifications.
 
 No paid AI API subscription is required when using Ollama.
 
@@ -96,19 +103,46 @@ Configure OpenClaw to use the local Ollama model:
 ollama/qwen3:8b
 ```
 
-Make sure OpenClaw can access and control a supported browser.
+Make sure OpenClaw's browser functionality is enabled.
 
-### 5. Log into ScholarOne
+The current application uses the OpenClaw browser through its Chrome DevTools Protocol (CDP) connection on port `18800`.
 
-Open the browser controlled by OpenClaw and log into your own ScholarOne account.
+Check browser status:
 
-The application uses your existing browser session. Do not put your ScholarOne password in the project files.
+```bash
+openclaw browser status
+```
+
+The application can start the OpenClaw browser automatically, so users do not need to open Brave manually before running the monitor.
+
+### 5. Configure ScholarOne login credentials
+
+The application stores ScholarOne credentials in the macOS Keychain rather than in project files.
+
+From the project directory, run:
+
+```bash
+python3 src/setup_credentials.py
+```
+
+Follow the prompts to enter your ScholarOne username and password.
+
+The credentials are saved securely in macOS Keychain under the service name:
+
+```text
+scholarone-monitor
+```
+
+The password is entered interactively and is not stored in the project directory.
+
+**Important:** Each user must configure their own ScholarOne credentials. Never share your credentials or commit them to GitHub.
 
 ### 6. Configure private email settings
 
 The application uses Gmail SMTP to send manuscript status notifications.
 
 You will need:
+
 - A Gmail account.
 - A Google App Password (16 characters), not your regular Gmail password.
 
@@ -162,6 +196,7 @@ NOTIFICATION_EMAIL=recipient@example.com
 ```
 
 Explanation:
+
 - `GMAIL_ADDRESS`: Your Gmail address used to send notifications.
 - `GMAIL_APP_PASSWORD`: The 16-character Google App Password generated in Step 2. Do not use your regular Gmail password.
 - `NOTIFICATION_EMAIL`: The email address that should receive manuscript status notifications. It can be the same as your Gmail address.
@@ -207,20 +242,50 @@ From the project directory:
 python3 src/monitor.py
 ```
 
-The application should retrieve the manuscript dashboard and check for status changes.
+The application automatically:
+
+1. Connects to the OpenClaw browser.
+2. Starts the browser if it is not already running.
+3. Opens the ScholarOne website if no ScholarOne tab exists.
+4. Checks whether the user is already logged in.
+5. Logs in automatically using credentials stored in macOS Keychain if necessary.
+6. Navigates to the Author Dashboard.
+7. Retrieves manuscript information.
+8. Compares the current statuses against previously recorded statuses.
+9. Sends an email notification if an existing manuscript's status has changed.
+
+Users do not need to manually open the browser or navigate to ScholarOne before running the application.
 
 The first time a manuscript is recorded, it becomes the baseline. Notifications are sent for subsequent status changes.
+
+**Note:** If ScholarOne requires CAPTCHA, multi-factor authentication, or additional verification, the user may need to complete that step manually.
+
+#### Test automatic login separately
+
+Users can also test the browser startup and login functionality independently:
+
+```bash
+python3 src/auto_login.py
+```
+
+This starts the OpenClaw browser if necessary, opens ScholarOne, and attempts to log in using Keychain credentials.
 
 ### 9. Configure automatic monitoring
 
 Automatic scheduling uses a macOS LaunchAgent.
 
-The scheduling setup is currently being tested and will be documented after the installation workflow is validated.
+The intended default monitoring interval is six hours.
+
+A LaunchAgent runs the monitoring script periodically while the Mac is powered on and available. The OpenClaw browser must also be accessible.
+
+The scheduling setup is currently being tested for distribution to new users.
 
 ## Data and Privacy
 
 Each user maintains their own:
+
 - OpenClaw browser session
+- ScholarOne login credentials
 - Ollama model
 - Email credentials
 - Monitoring configuration
@@ -233,14 +298,19 @@ Private data is stored locally in:
 ~/.scholarone-monitor/
 ```
 
+ScholarOne credentials are stored in macOS Keychain.
+
+Email credentials are stored in a private `.env` file.
+
 No manuscript data or email credentials should be uploaded to GitHub.
 
 ## Future Development
 
 Planned improvements:
+
 - Support for Editorial Manager and additional manuscript platforms.
 - Support for Chrome and other browsers.
 - A user-friendly installation and configuration interface.
 - Support for additional local AI models.
 - Easier installation and distribution.
-- Update to use with other browsers.
+- A more general-purpose manuscript monitoring application for researchers using different submission systems.
