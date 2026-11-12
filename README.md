@@ -1,18 +1,21 @@
 # Manuscript Status Update Agent
 
-An experimental local application that monitors manuscript submission statuses on ScholarOne and sends email notifications when a manuscript's status changes.
+An experimental local application that monitors manuscript submission statuses and sends email notifications when a manuscript's status changes.
+
+The application uses **OpenClaw for browser automation** and **Ollama for locally hosted AI models**. It is designed to run on users' own computers without requiring a paid AI API subscription.
 
 ## Overview
 
-The goal of this project is to help researchers avoid manually checking manuscript submission websites.
+The application helps researchers avoid manually checking manuscript submission websites.
 
-The application:
-- Retrieves manuscript information from a submission website using an OpenClaw browser session.
+Features:
+- Retrieves manuscript information from submission websites using OpenClaw.
+- Uses a locally hosted AI model through Ollama.
 - Tracks manuscript IDs, titles, and statuses.
 - Detects changes in manuscript status.
 - Sends email notifications when an existing manuscript's status changes.
 - Allows users to configure their own monitoring interval.
-- Stores monitoring data and credentials locally on their computers.
+- Stores credentials and monitoring data locally.
 
 ## Current Status
 
@@ -22,6 +25,8 @@ Currently supported:
 - Operating system: macOS
 - Manuscript platform: ScholarOne
 - Browser automation: OpenClaw
+- Local AI models: Ollama
+- Tested model: Qwen3 8B (`qwen3:8b`)
 - Email notifications: Gmail SMTP
 - Scheduling: macOS LaunchAgent
 
@@ -29,11 +34,15 @@ The application has not yet been fully tested on another computer.
 
 ## Requirements
 
-- macOS
-- Python (version 3.14 has been tested)
-- OpenClaw installed and configured
-- A working OpenClaw browser session logged into ScholarOne
-- A Gmail account with an app password for email notifications
+Users need to install:
+
+1. **Python** — runs the monitoring application.
+2. **OpenClaw** — controls the browser and retrieves manuscript information.
+3. **Ollama** — runs the AI model locally.
+4. **A supported browser** — used to access the manuscript submission website.
+5. **A Gmail account** — used to send email notifications.
+
+No paid AI API subscription is required when using Ollama.
 
 ## Installation
 
@@ -51,9 +60,51 @@ cd Manuscript-Status-Update-Agent
 python3 -m pip install -r requirements.txt
 ```
 
-### 3. Configure private settings
+### 3. Install Ollama
 
-The application stores private settings outside the project directory.
+Download Ollama:
+
+https://ollama.com/download
+
+Install and open Ollama.
+
+Download the default model:
+
+```bash
+ollama pull qwen3:8b
+```
+
+Test the model:
+
+```bash
+ollama run qwen3:8b
+```
+
+If the model responds successfully, Ollama is working.
+
+The default model is Qwen3 8B. Users may need a smaller model depending on their computer's available memory.
+
+### 4. Install and configure OpenClaw
+
+Install OpenClaw following its official instructions:
+
+https://docs.openclaw.ai/
+
+Configure OpenClaw to use the local Ollama model:
+
+```text
+ollama/qwen3:8b
+```
+
+Make sure OpenClaw can access and control a supported browser.
+
+### 5. Log into ScholarOne
+
+Open the browser controlled by OpenClaw and log into your own ScholarOne account.
+
+The application uses your existing browser session. Do not put your ScholarOne password in the project files.
+
+### 6. Configure private email settings
 
 Create the private configuration directory:
 
@@ -61,7 +112,7 @@ Create the private configuration directory:
 mkdir -p ~/.scholarone-monitor/logs
 ```
 
-Create your private email configuration:
+Copy the example email configuration:
 
 ```bash
 cp .env.example ~/.scholarone-monitor/.env
@@ -81,7 +132,7 @@ GMAIL_APP_PASSWORD=your_gmail_app_password
 NOTIFICATION_EMAIL=recipient@example.com
 ```
 
-Save the file and protect it:
+Save and protect the file:
 
 ```bash
 chmod 600 ~/.scholarone-monitor/.env
@@ -89,7 +140,7 @@ chmod 600 ~/.scholarone-monitor/.env
 
 Never share your `.env` file or upload it to GitHub.
 
-### 4. Configure monitoring frequency
+### 7. Configure monitoring frequency
 
 Copy the example configuration:
 
@@ -112,15 +163,9 @@ Example:
 }
 ```
 
-Change the interval to your preferred number of hours.
+Users can change the monitoring interval to their preferred frequency.
 
-### 5. Log into ScholarOne
-
-Open your OpenClaw browser and log into your ScholarOne account.
-
-The application uses your existing browser session. Do not put your ScholarOne password in the project files.
-
-### 6. Run a manual test
+### 8. Run a manual test
 
 From the project directory:
 
@@ -132,33 +177,36 @@ The application should retrieve the manuscript dashboard and check for status ch
 
 The first time a manuscript is recorded, it becomes the baseline. Notifications are sent for subsequent status changes.
 
-### 7. Configure automatic monitoring
+### 9. Configure automatic monitoring
 
-Automatic scheduling is being tested and will be documented after the installation workflow is validated.
+Automatic scheduling uses a macOS LaunchAgent.
+
+The scheduling setup is currently being tested and will be documented after the installation workflow is validated.
 
 ## Data and Privacy
 
 Each user maintains their own:
+- OpenClaw browser session
+- Ollama model
 - Email credentials
 - Monitoring configuration
 - Manuscript database
-- Browser session
 - Monitoring logs
 
-These are stored locally in:
+Private data is stored locally in:
 
 ```text
 ~/.scholarone-monitor/
 ```
 
-Private data should never be committed to the GitHub repository.
+No manuscript data or email credentials should be uploaded to GitHub.
 
 ## Future Development
 
 Planned improvements:
 - Support for Editorial Manager and additional manuscript platforms.
+- Support for Chrome and other browsers.
 - A user-friendly installation and configuration interface.
-- Support for different AI agents and browser automation tools.
-- More email providers.
+- Support for additional local AI models.
 - Easier installation and distribution.
-- Update for other browsers
+- Update to use with other browsers.
