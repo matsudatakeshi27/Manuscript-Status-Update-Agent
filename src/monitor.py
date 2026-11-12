@@ -1,3 +1,4 @@
+
 import os
 import sys
 import json
@@ -8,6 +9,7 @@ from datetime import datetime, timezone
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from dotenv import load_dotenv
+from auto_login import auto_login
 
 from paths import (
     CONFIG_FILE,
@@ -92,6 +94,10 @@ def process_browser_results():
         notifications_enabled = True
 
     print("Checking ScholarOne...")
+
+    if not auto_login():
+        print("Could not confirm ScholarOne login. Monitoring stopped.")
+        return
 
     subprocess.run(
         [sys.executable, str(APP_DIR / "fetch_browser_results.py")],

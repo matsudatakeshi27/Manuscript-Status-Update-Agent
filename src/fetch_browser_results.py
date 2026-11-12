@@ -1,9 +1,11 @@
+
 import json
 import shutil
 import subprocess
-from pathlib import Path
+import time
 
 from paths import RESULTS_FILE, APP_DIR
+
 
 JS = r"""() => {
     const bodyText = document.body?.innerText || "";
@@ -29,7 +31,8 @@ JS = r"""() => {
         const headers = rows[headerIndex].map(h => h.toLowerCase());
 
         const idIndex = headers.findIndex(h =>
-            /manuscript\s*(id|number|#)/i.test(h));
+            /manuscript\s*(id|number|#)/i.test(h)
+        );
         const titleIndex = headers.findIndex(h => /title/i.test(h));
         const statusIndex = headers.findIndex(h => /status/i.test(h));
 
@@ -52,6 +55,7 @@ JS = r"""() => {
     });
 }"""
 
+
 def main():
     openclaw = shutil.which("openclaw")
 
@@ -61,6 +65,35 @@ def main():
             "its executable is available in PATH."
         )
 
+    # First, navigate to the Author Dashboard.
+    navigation = subprocess.run(
+        [
+            openclaw,
+            "browser",
+            "evaluate",
+            "--fn",
+            """() => {
+                const link = [...document.querySelectorAll('a')]
+                    .find(a => (a.innerText || '').trim() === 'Author');
+
+                if (!link) return 'Author link not found';
+
+                link.click();
+                return 'Author navigation clicked';
+            }"""
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(APP_DIR.parent)
+    )
+
+    if navigation.returncode != 0:
+        raise RuntimeError("Could not navigate to Author Dashboard.")
+
+    # Wait for the dashboard to load.
+    time.sleep(3)
+
+    # Then extract manuscript information from the dashboard.
     result = subprocess.run(
         [openclaw, "browser", "evaluate", "--fn", JS],
         capture_output=True,
