@@ -106,13 +106,42 @@ The application uses your existing browser session. Do not put your ScholarOne p
 
 ### 6. Configure private email settings
 
+The application uses Gmail SMTP to send manuscript status notifications.
+
+You will need:
+- A Gmail account.
+- A Google App Password (16 characters), not your regular Gmail password.
+
+#### Step 1. Enable 2-Step Verification
+
+Google requires 2-Step Verification before you can generate an App Password.
+
+1. Visit https://myaccount.google.com/security
+2. Find **How you sign in to Google**.
+3. Enable **2-Step Verification** if it is not already enabled.
+
+#### Step 2. Generate a Google App Password
+
+1. Visit https://myaccount.google.com/apppasswords
+2. Sign in to your Google account.
+3. Enter an app name, such as `Manuscript Monitor`.
+4. Click **Create**.
+5. Google will generate a 16-character App Password.
+6. Copy this password and keep it private.
+
+Google may display the password with spaces for readability. Enter it without spaces in your configuration file.
+
+Note: App Passwords may be unavailable for some Google accounts, including accounts managed by organizations with certain security policies.
+
+#### Step 3. Create your private email configuration
+
 Create the private configuration directory:
 
 ```bash
 mkdir -p ~/.scholarone-monitor/logs
 ```
 
-Copy the example email configuration:
+Copy the example configuration:
 
 ```bash
 cp .env.example ~/.scholarone-monitor/.env
@@ -124,21 +153,26 @@ Edit the file:
 nano ~/.scholarone-monitor/.env
 ```
 
-Enter your own Gmail settings:
+Enter your own information:
 
 ```text
 GMAIL_ADDRESS=your_email@gmail.com
-GMAIL_APP_PASSWORD=your_gmail_app_password
+GMAIL_APP_PASSWORD=your_16_character_app_password
 NOTIFICATION_EMAIL=recipient@example.com
 ```
 
-Save and protect the file:
+Explanation:
+- `GMAIL_ADDRESS`: Your Gmail address used to send notifications.
+- `GMAIL_APP_PASSWORD`: The 16-character Google App Password generated in Step 2. Do not use your regular Gmail password.
+- `NOTIFICATION_EMAIL`: The email address that should receive manuscript status notifications. It can be the same as your Gmail address.
+
+Save the file and restrict access:
 
 ```bash
 chmod 600 ~/.scholarone-monitor/.env
 ```
 
-Never share your `.env` file or upload it to GitHub.
+**Security:** Never share your App Password, commit your `.env` file, or upload it to GitHub. Each user must generate and configure their own App Password.
 
 ### 7. Configure monitoring frequency
 
