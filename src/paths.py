@@ -1,0 +1,22 @@
+from pathlib import Path
+
+# Application source directory
+APP_DIR = Path(__file__).resolve().parent
+
+# Private user data directory
+DATA_DIR = Path.home() / ".scholarone-monitor"
+
+# Private configuration and data
+CONFIG_FILE = DATA_DIR / "config.json"
+ENV_FILE = DATA_DIR / ".env"
+DATABASE_FILE = DATA_DIR / "manuscripts.json"
+RESULTS_FILE = DATA_DIR / "browser_results.json"
+
+# Private logs
+LOG_DIR = DATA_DIR / "logs"
+LOG_FILE = LOG_DIR / "monitor.log"
+ERROR_LOG_FILE = LOG_DIR / "monitor_error.log"
+
+# Create required directories
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+LOG_DIR.mkdir(parents=True, exist_ok=True)

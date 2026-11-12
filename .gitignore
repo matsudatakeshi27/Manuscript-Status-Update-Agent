@@ -1,0 +1,18 @@
+.env
+.env.*
+!.env.example
+
+__pycache__/
+*.py[cod]
+.DS_Store
+
+user_data/
+config.json
+manuscripts.json
+browser_results.json
+
+*.log
+*.plist
+
+# Private email credentials
+.env

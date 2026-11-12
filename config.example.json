@@ -1,0 +1,4 @@
+{
+    "monitoring_interval_hours": 6,
+    "notification_enabled": true
+}
