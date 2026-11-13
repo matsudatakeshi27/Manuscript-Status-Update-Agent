@@ -10,15 +10,17 @@ The application helps researchers avoid manually checking manuscript submission 
 
 Features:
 
-- Automatically starts the OpenClaw browser when needed.
-- Automatically opens the ScholarOne website.
+- Automatically starts and connects to the OpenClaw-controlled browser.
+- Opens the relevant ScholarOne websites.
 - Automatically logs into ScholarOne using credentials stored securely in macOS Keychain.
-- Automatically navigates to the Author Dashboard.
-- Retrieves manuscript information from submission websites.
-- Tracks manuscript IDs, titles, and statuses.
+- Supports multiple journals, each with its own login credentials.
+- Navigates to the Author Dashboard.
+- Retrieves manuscripts from multiple available dashboard queues.
+- Tracks manuscript IDs, titles, journals, and statuses.
 - Detects changes in manuscript status.
 - Sends email notifications when an existing manuscript's status changes.
 - Allows users to configure their own monitoring interval.
+- Runs automatically in the background using macOS LaunchAgent.
 - Stores credentials and monitoring data locally.
 
 ## Current Status
@@ -29,14 +31,37 @@ Currently supported:
 
 - Operating system: macOS
 - Manuscript platform: ScholarOne
+- Supported journals:
+  - Marketing Science
+  - Journal of Marketing Research
 - Browser automation: OpenClaw
 - Browser interaction: Playwright
 - Local AI models: Ollama
 - Tested model: Qwen3 8B (`qwen3:8b`)
+- Browser: Brave on macOS
 - Email notifications: Gmail SMTP
 - Scheduling: macOS LaunchAgent
 
-The application has not yet been fully tested on another computer.
+The application has been tested with two ScholarOne journals on the developer's computer. It has not yet been fully tested on another computer.
+
+## Supported Journals and Manuscript Queues
+
+| Journal | ScholarOne URL |
+|---|---|
+| Marketing Science | https://mc.manuscriptcentral.com/mksc |
+| Journal of Marketing Research | https://mc.manuscriptcentral.com/ama_jmr |
+
+For each journal, the application checks the following Author Dashboard queues:
+
+1. **Manuscripts with Decisions** — required queue.
+2. **Submitted Manuscripts** — checked when available.
+3. **Manuscripts I Have Co-Authored** — checked when available.
+
+Optional queues are skipped if they are not available in a particular journal account.
+
+Manuscripts are deduplicated by manuscript ID within each journal. The same manuscript ID in different journals is treated as a separate record.
+
+The application currently does not monitor **Unsubmitted and Manuscripts in Draft**.
 
 ## Requirements
 
@@ -45,11 +70,13 @@ Users need to install:
 1. **Python** — runs the monitoring application.
 2. **OpenClaw** — manages the browser.
 3. **Playwright** — interacts with the browser.
-4. **Ollama** — runs the AI model locally.
+4. **Ollama** — runs the AI model locally when required by the OpenClaw configuration.
 5. **A supported browser** — currently tested with Brave on macOS.
 6. **A Gmail account** — used to send email notifications.
 
 No paid AI API subscription is required when using Ollama.
+
+Note: The manuscript scraping and status-comparison workflow is implemented in Python. Ollama is used as the locally hosted model configured for OpenClaw; the monitoring script does not need to invoke an AI model for every status comparison.
 
 ## Installation
 
@@ -105,7 +132,11 @@ ollama/qwen3:8b
 
 Make sure OpenClaw's browser functionality is enabled.
 
-The current application uses the OpenClaw browser through its Chrome DevTools Protocol (CDP) connection on port `18800`.
+The application connects to the OpenClaw-controlled browser through its Chrome DevTools Protocol (CDP) endpoint:
+
+```text
+http://127.0.0.1:18800
+```
 
 Check browser status:
 
@@ -113,11 +144,11 @@ Check browser status:
 openclaw browser status
 ```
 
-The application can start the OpenClaw browser automatically, so users do not need to open Brave manually before running the monitor.
+The monitoring application can start the OpenClaw browser automatically. Users should not need to open Brave manually before running the monitor.
 
 ### 5. Configure ScholarOne login credentials
 
-The application stores ScholarOne credentials in the macOS Keychain rather than in project files.
+The application stores ScholarOne credentials in macOS Keychain rather than in project files.
 
 From the project directory, run:
 
@@ -125,17 +156,18 @@ From the project directory, run:
 python3 src/setup_credentials.py
 ```
 
-Follow the prompts to enter your ScholarOne username and password.
+Follow the prompts to enter the username and password for each supported journal.
 
-The credentials are saved securely in macOS Keychain under the service name:
+The current implementation uses separate Keychain services:
 
-```text
-scholarone-monitor
-```
+| Journal | Keychain service |
+|---|---|
+| Marketing Science | `marketingscience-monitor` |
+| Journal of Marketing Research | `jmr-monitor` |
 
 The password is entered interactively and is not stored in the project directory.
 
-**Important:** Each user must configure their own ScholarOne credentials. Never share your credentials or commit them to GitHub.
+**Important:** Each user must configure their own ScholarOne credentials for every journal they want to monitor. Never share credentials or commit them to GitHub.
 
 ### 6. Configure private email settings
 
@@ -198,7 +230,7 @@ NOTIFICATION_EMAIL=recipient@example.com
 Explanation:
 
 - `GMAIL_ADDRESS`: Your Gmail address used to send notifications.
-- `GMAIL_APP_PASSWORD`: The 16-character Google App Password generated in Step 2. Do not use your regular Gmail password.
+- `GMAIL_APP_PASSWORD`: The 16-character Google App Password generated above. Do not use your regular Gmail password.
 - `NOTIFICATION_EMAIL`: The email address that should receive manuscript status notifications. It can be the same as your Gmail address.
 
 Save the file and restrict access:
@@ -239,46 +271,59 @@ Users can change the monitoring interval to their preferred frequency.
 From the project directory:
 
 ```bash
-python3 src/monitor.py
+python3 -u src/monitor.py
 ```
 
 The application automatically:
 
-1. Connects to the OpenClaw browser.
-2. Starts the browser if it is not already running.
-3. Opens the ScholarOne website if no ScholarOne tab exists.
+1. Connects to the OpenClaw-controlled browser.
+2. Starts the browser if necessary.
+3. Opens the relevant ScholarOne journal websites.
 4. Checks whether the user is already logged in.
-5. Logs in automatically using credentials stored in macOS Keychain if necessary.
-6. Navigates to the Author Dashboard.
-7. Retrieves manuscript information.
-8. Compares the current statuses against previously recorded statuses.
-9. Sends an email notification if an existing manuscript's status has changed.
+5. Logs in using credentials stored in macOS Keychain if necessary.
+6. Navigates to each journal's Author Dashboard.
+7. Retrieves available manuscript queues.
+8. Combines and deduplicates the manuscript records.
+9. Compares current statuses against previously recorded statuses.
+10. Sends an email notification if an existing manuscript's status has changed.
 
-Users do not need to manually open the browser or navigate to ScholarOne before running the application.
+The monitor processes both journals before updating the manuscript database. If retrieving results from either journal fails, it should not proceed with a partial two-journal update.
 
-The first time a manuscript is recorded, it becomes the baseline. Notifications are sent for subsequent status changes.
+The first time a manuscript is recorded, it becomes the baseline. No notification is sent for a newly discovered manuscript. Notifications are sent for subsequent status changes.
 
 **Note:** If ScholarOne requires CAPTCHA, multi-factor authentication, or additional verification, the user may need to complete that step manually.
 
 #### Test automatic login separately
 
-Users can also test the browser startup and login functionality independently:
+Users can also test browser startup and login functionality independently:
 
 ```bash
 python3 src/auto_login.py
 ```
 
-This starts the OpenClaw browser if necessary, opens ScholarOne, and attempts to log in using Keychain credentials.
+The login automation supports the two configured journals. The monitoring workflow invokes it separately for each journal.
 
 ### 9. Configure automatic monitoring
 
 Automatic scheduling uses a macOS LaunchAgent.
 
-The intended default monitoring interval is six hours.
+The current local implementation is configured to run the monitoring script every six hours.
 
 A LaunchAgent runs the monitoring script periodically while the Mac is powered on and available. The OpenClaw browser must also be accessible.
 
-The scheduling setup is currently being tested for distribution to new users.
+To check whether the scheduled job is loaded:
+
+```bash
+launchctl list | grep -i scholarone
+```
+
+To run the monitor manually at any time:
+
+```bash
+python3 -u src/monitor.py
+```
+
+**Important:** The LaunchAgent setup has been tested on the developer's Mac. Automatic LaunchAgent installation and configuration for new users still need further development and testing.
 
 ## Data and Privacy
 
@@ -290,6 +335,7 @@ Each user maintains their own:
 - Email credentials
 - Monitoring configuration
 - Manuscript database
+- Browser results
 - Monitoring logs
 
 Private data is stored locally in:
@@ -298,11 +344,66 @@ Private data is stored locally in:
 ~/.scholarone-monitor/
 ```
 
+Typical files include:
+
+```text
+~/.scholarone-monitor/
+├── .env
+├── config.json
+├── manuscripts.json
+├── browser_results.json
+└── logs/
+```
+
 ScholarOne credentials are stored in macOS Keychain.
 
 Email credentials are stored in a private `.env` file.
 
-No manuscript data or email credentials should be uploaded to GitHub.
+Manuscript records and monitoring results are stored locally.
+
+No manuscript data, login credentials, or email credentials should be uploaded to GitHub.
+
+## Troubleshooting
+
+### OpenClaw browser is unavailable
+
+Check the browser status:
+
+```bash
+openclaw browser status
+```
+
+Start the browser:
+
+```bash
+openclaw browser start
+```
+
+### Login fails
+
+Check that the correct credentials have been configured in macOS Keychain for each journal. Complete any required CAPTCHA or additional verification manually.
+
+### Email notifications are not received
+
+Check the following:
+
+- Gmail address is correct.
+- Google App Password is correct.
+- Recipient email address is correct.
+- Gmail SMTP authentication is working.
+- The manuscript's status actually changed.
+
+The application sends notifications for status changes, not for every monitoring run.
+
+### Scheduled monitoring does not run
+
+Check whether the LaunchAgent is loaded:
+
+```bash
+launchctl list | grep -i scholarone
+```
+
+Make sure the Mac is powered on and the scheduled process has access to the project and browser.
 
 ## Future Development
 
@@ -313,4 +414,5 @@ Planned improvements:
 - A user-friendly installation and configuration interface.
 - Support for additional local AI models.
 - Easier installation and distribution.
+- Simplified LaunchAgent installation for new users.
 - A more general-purpose manuscript monitoring application for researchers using different submission systems.
