@@ -2,68 +2,91 @@
 import asyncio
 import json
 import re
+import sys
 from pathlib import Path
+
 from playwright.async_api import async_playwright
 
 CDP_URL = "http://127.0.0.1:18800"
-RESULTS_FILE = Path.home() / ".scholarone-monitor" / "browser_results.json"
+
+RESULTS_FILE = (
+    Path.home() / ".scholarone-monitor" / "browser_results.json"
+)
+
+JOURNALS = {
+    "Marketing Science": "/mksc",
+    "Journal of Marketing Research": "/ama_jmr",
+}
 
 
-async def find_scholarone_page(browser):
+async def find_scholarone_page(browser, journal):
+    expected_path = JOURNALS[journal]
+
     for context in browser.contexts:
         for page in context.pages:
-            if "mc.manuscriptcentral.com/mksc" in page.url:
+            if (
+                "mc.manuscriptcentral.com" in page.url
+                and expected_path in page.url
+            ):
                 return page
 
-    raise RuntimeError("No ScholarOne tab found. Open ScholarOne in Brave first.")
+    raise RuntimeError(f"No open ScholarOne tab found for {journal}.")
 
 
+async def ensure_author_menu(page):
+    decisions = page.get_by_role(
+        "link",
+        name=re.compile(r"Manuscripts with Decisions", re.I),
+    )
 
-async def go_to_author_dashboard(page):
-    # Check which menu item is currently active.
-    active_item = page.locator("li.nav-submenu.active")
+    if await decisions.count() == 0:
+        print("Opening Author menu...")
 
-    active_text = ""
-    if await active_item.count() > 0:
-        active_text = await active_item.first.inner_text()
+        author = page.get_by_text("Author", exact=True).first
+        await author.click()
+        await page.wait_for_timeout(2000)
 
-    if "Manuscripts with Decisions" in active_text:
-        print("Already on Manuscripts with Decisions.")
+    return page.get_by_role(
+        "link",
+        name=re.compile(r"Manuscripts with Decisions", re.I),
+    )
+
+
+async def open_queue(page, label, required=False):
+    """Navigate to a dashboard queue using its visible menu link."""
+
+    await ensure_author_menu(page)
+
+    link = page.get_by_role(
+        "link",
+        name=re.compile(re.escape(label), re.I),
+    )
+
+    if await link.count() == 0:
+        if required:
+            raise RuntimeError(f"Required queue not found: {label}")
+
+        print(f"{label}: tab not available; skipping.")
+        return False
+
+    # Avoid clicking again if this queue is already selected.
+    active = await page.locator(
+        "li.nav-submenu.active"
+    ).all_inner_texts()
+
+    if any(label.lower() in item.lower() for item in active):
+        print(f"{label}: already selected.")
     else:
-        print("Navigating to Manuscripts with Decisions...")
-
-        decisions_link = page.get_by_role(
-            "link",
-            name=re.compile(r"Manuscripts with Decisions", re.I)
-        )
-
-        if await decisions_link.count() == 0:
-            raise RuntimeError(
-                "Could not find Manuscripts with Decisions link."
-            )
-
-        await decisions_link.first.click()
-
-        # Wait until the correct sidebar item becomes active.
-        await page.wait_for_function("""
-            () => {
-                const active = document.querySelector(
-                    'li.nav-submenu.active'
-                );
-                return active &&
-                    active.innerText.includes(
-                        'Manuscripts with Decisions'
-                    );
-            }
-        """, timeout=20000)
-
-        await page.wait_for_timeout(3000)
+        print(f"Opening {label}...")
+        await link.first.click()
+        await page.wait_for_timeout(4000)
 
     await page.locator("#authorDashboardQueue").wait_for(
         state="visible",
-        timeout=15000
+        timeout=20000,
     )
 
+    return True
 
 
 async def set_page_size(page):
@@ -72,39 +95,54 @@ async def set_page_size(page):
     ).first
 
     if await dropdown.count() > 0:
-        await dropdown.select_option("50")
-        await page.wait_for_timeout(2000)
+        try:
+            await dropdown.select_option("50")
+            await page.wait_for_timeout(2000)
+        except Exception:
+            pass
 
 
-
-async def scrape_current_table(page, source):
+async def scrape_current_table(page, source, journal):
     for attempt in range(5):
         try:
             await page.locator("#authorDashboardQueue").wait_for(
-                state="visible", timeout=15000
+                state="visible",
+                timeout=15000,
             )
 
             await set_page_size(page)
-
-            # Give ScholarOne time to finish any table refresh.
-            await page.wait_for_timeout(3000)
+            await page.wait_for_timeout(2000)
 
             records = await page.locator(
                 "#authorDashboardQueue tbody tr"
             ).evaluate_all(
-                """(rows, source) => rows.map(row => {
-                    const id = row.querySelector('td[data-label="ID"]');
-                    const title = row.querySelector('td[data-label="title"]');
-                    const statusCell = row.querySelector('td[data-label="status"]');
+                r"""(rows, args) => rows.map(row => {
+                    const id = row.querySelector(
+                        'td[data-label="ID"]'
+                    );
 
-                    if (!id || !title || !statusCell) return null;
+                    const title = row.querySelector(
+                        'td[data-label="title"]'
+                    );
+
+                    const statusCell = row.querySelector(
+                        'td[data-label="status"]'
+                    );
+
+                    if (!id || !title || !statusCell) {
+                        return null;
+                    }
 
                     const statusSpans = Array.from(
-                        statusCell.querySelectorAll("span.pagecontents")
+                        statusCell.querySelectorAll(
+                            "span.pagecontents"
+                        )
                     );
 
                     const statusSpan = statusSpans.find(span =>
-                        /\\(\\d{1,2}-[A-Za-z]{3}-\\d{4}\\)/.test(span.innerText)
+                        /\(\d{1,2}-[A-Za-z]{3}-\d{4}\)/.test(
+                            span.innerText
+                        )
                     );
 
                     const statusText = statusSpan
@@ -112,114 +150,157 @@ async def scrape_current_table(page, source):
                         : statusCell.innerText.trim();
 
                     const dateMatch = statusText.match(
-                        /\\((\\d{1,2}-[A-Za-z]{3}-\\d{4})\\)/
+                        /\((\d{1,2}-[A-Za-z]{3}-\d{4})\)/
                     );
 
                     const status = statusText
-                        .replace(/\\s*\\(\\d{1,2}-[A-Za-z]{3}-\\d{4}\\)/, "")
+                        .replace(
+                            /\s*\(\d{1,2}-[A-Za-z]{3}-\d{4}\)/,
+                            ""
+                        )
                         .trim();
 
                     return {
                         manuscript_id: id.innerText.trim(),
                         title: title.innerText.trim(),
                         status: status,
-                        status_date: dateMatch ? dateMatch[1] : null,
-                        source: source
+                        status_date: dateMatch
+                            ? dateMatch[1]
+                            : null,
+                        source: args.source,
+                        journal: args.journal
                     };
                 }).filter(Boolean)""",
-                source
+                {"source": source, "journal": journal},
             )
 
             print(f"{source}: {len(records)} manuscripts found.")
             return records
 
-        except Exception as e:
+        except Exception:
             if attempt == 4:
                 raise
 
             print(
-                f"Table refresh detected (attempt {attempt + 1}/5). "
-                "Retrying..."
+                f"Table refresh detected "
+                f"(attempt {attempt + 1}/5). Retrying..."
             )
             await page.wait_for_timeout(3000)
 
     return []
 
 
-
-async def go_to_coauthored_page(page, previous_ids):
-    print("Opening Manuscripts I Have Co-Authored...")
-
-    # Trigger the exact ScholarOne navigation action from the menu.
-    await page.evaluate("""
-        () => {
-            setField('DATATABLE_CURRENT_PAGE_AUTHOR_CENTER', 0);
-            setField('DATATABLE_PAGE_LENGTH_AUTHOR_CENTER', 10);
-            setDataAndNextPage(
-                'MS_LIST_TO_DISPLAY',
-                5,
-                'AUTHOR_VIEW_MANUSCRIPTS'
-            );
-        }
-    """)
-
-    # Wait for ScholarOne to finish updating the table.
-    await page.wait_for_timeout(5000)
-
-    await page.locator("#authorDashboardQueue").wait_for(
-        state="visible",
-        timeout=20000
+async def main():
+    journal = (
+        sys.argv[1]
+        if len(sys.argv) > 1
+        else "Marketing Science"
     )
 
-    print("Co-authored page navigation requested.")
+    if journal not in JOURNALS:
+        raise ValueError(
+            f"Unknown journal: {journal}. "
+            f"Choose one of: {', '.join(JOURNALS)}"
+        )
 
-
-
-async def main():
     async with async_playwright() as p:
         browser = await p.chromium.connect_over_cdp(CDP_URL)
 
-        page = await find_scholarone_page(browser)
-        print("ScholarOne tab found.")
+        page = await find_scholarone_page(browser, journal)
 
-        await go_to_author_dashboard(page)
+        print(f"ScholarOne tab found: {journal}")
 
-        print("Scraping Author Dashboard...")
+        # Required queue
+        available = await open_queue(
+            page,
+            "Manuscripts with Decisions",
+            required=True,
+        )
+
         author_records = await scrape_current_table(
-            page, "Author Dashboard"
+            page,
+            "Manuscripts with Decisions",
+            journal,
         )
 
-        author_ids = [
-            record["manuscript_id"] for record in author_records
-        ]
+        # Optional queue
+        submitted_records = []
 
-        await go_to_coauthored_page(page, author_ids)
+        if await open_queue(
+            page,
+            "Submitted Manuscripts",
+        ):
+            submitted_records = await scrape_current_table(
+                page,
+                "Submitted Manuscripts",
+                journal,
+            )
 
-        print("Scraping co-authored manuscripts...")
-        coauthored_records = await scrape_current_table(
-            page, "Co-Authored"
-        )
+        # Optional queue
+        coauthored_records = []
 
-        # Combine both queues and remove duplicate manuscript IDs.
+        if await open_queue(
+            page,
+            "Manuscripts I Have Co-Authored",
+        ):
+            coauthored_records = await scrape_current_table(
+                page,
+                "Co-Authored",
+                journal,
+            )
+
+        # Deduplicate by manuscript ID within this journal.
         combined = []
         seen_ids = set()
 
-        for record in author_records + coauthored_records:
+        all_records = (
+            author_records
+            + submitted_records
+            + coauthored_records
+        )
+
+        for record in all_records:
             manuscript_id = record["manuscript_id"]
 
             if manuscript_id not in seen_ids:
                 combined.append(record)
                 seen_ids.add(manuscript_id)
 
-        RESULTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        RESULTS_FILE.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
 
-        with open(RESULTS_FILE, "w", encoding="utf-8") as f:
-            json.dump(combined, f, indent=4, ensure_ascii=False)
+        with open(
+            RESULTS_FILE,
+            "w",
+            encoding="utf-8",
+        ) as f:
+            json.dump(
+                combined,
+                f,
+                indent=4,
+                ensure_ascii=False,
+            )
 
         print()
-        print(f"Author Dashboard: {len(author_records)}")
-        print(f"Co-Authored: {len(coauthored_records)}")
-        print(f"Combined unique manuscripts: {len(combined)}")
+        print(f"Journal: {journal}")
+        print(
+            f"Manuscripts with Decisions: "
+            f"{len(author_records)}"
+        )
+        print(
+            f"Submitted Manuscripts: "
+            f"{len(submitted_records)}"
+        )
+        print(
+            f"Co-Authored: "
+            f"{len(coauthored_records)}"
+        )
+        print(
+            f"Combined unique manuscripts: "
+            f"{len(combined)}"
+        )
         print(f"Saved to: {RESULTS_FILE}")
 
 

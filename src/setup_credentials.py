@@ -1,7 +1,7 @@
 import getpass
 import keyring
 
-SERVICE = "scholarone-monitor"
+SERVICE = "marketingscience-monitor"
 
 username = input("ScholarOne username: ").strip()
 password = getpass.getpass("ScholarOne password: ")
