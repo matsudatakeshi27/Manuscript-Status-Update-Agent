@@ -1,10 +1,17 @@
-from pathlib import Path
 
-# Application source directory
+from pathlib import Path
+from platformdirs import user_data_dir
+
+# Source directory
 APP_DIR = Path(__file__).resolve().parent
 
-# Private user data directory
-DATA_DIR = Path.home() / ".scholarone-monitor"
+# Main project directory
+PROJECT_DIR = APP_DIR.parent
+
+# Private application data directory
+DATA_DIR = Path(
+    user_data_dir("ScholarOneMonitor", appauthor=False)
+)
 
 # Private configuration and data
 CONFIG_FILE = DATA_DIR / "config.json"

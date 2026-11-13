@@ -3,14 +3,15 @@ import asyncio
 import json
 import re
 import sys
+import os
 from pathlib import Path
-
 from playwright.async_api import async_playwright
 
-CDP_URL = "http://127.0.0.1:18800"
+from paths import RESULTS_FILE
 
-RESULTS_FILE = (
-    Path.home() / ".scholarone-monitor" / "browser_results.json"
+CDP_URL = os.getenv(
+    "OPENCLAW_CDP_URL",
+    "http://127.0.0.1:18800"
 )
 
 JOURNALS = {
@@ -30,7 +31,9 @@ async def find_scholarone_page(browser, journal):
             ):
                 return page
 
-    raise RuntimeError(f"No open ScholarOne tab found for {journal}.")
+    raise RuntimeError(
+        f"No open ScholarOne tab found for {journal}."
+    )
 
 
 async def ensure_author_menu(page):
@@ -64,12 +67,13 @@ async def open_queue(page, label, required=False):
 
     if await link.count() == 0:
         if required:
-            raise RuntimeError(f"Required queue not found: {label}")
+            raise RuntimeError(
+                f"Required queue not found: {label}"
+            )
 
         print(f"{label}: tab not available; skipping.")
         return False
 
-    # Avoid clicking again if this queue is already selected.
     active = await page.locator(
         "li.nav-submenu.active"
     ).all_inner_texts()
@@ -174,7 +178,9 @@ async def scrape_current_table(page, source, journal):
                 {"source": source, "journal": journal},
             )
 
-            print(f"{source}: {len(records)} manuscripts found.")
+            print(
+                f"{source}: {len(records)} manuscripts found."
+            )
             return records
 
         except Exception:
@@ -211,7 +217,7 @@ async def main():
         print(f"ScholarOne tab found: {journal}")
 
         # Required queue
-        available = await open_queue(
+        await open_queue(
             page,
             "Manuscripts with Decisions",
             required=True,
