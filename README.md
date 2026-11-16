@@ -566,11 +566,6 @@ Check the LaunchAgent on macOS or task history in Windows Task Scheduler. Also i
 - OpenClaw and an accessible browser session are required.
 - Windows support is experimental and needs testing.
 
-Before pushing changes to GitHub, check:
-
-```bash
-git status --short
-```
 
 ## Repository
 
