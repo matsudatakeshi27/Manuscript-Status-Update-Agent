@@ -2,8 +2,8 @@
 import os
 import subprocess
 import time
-
 import keyring
+
 from playwright.sync_api import sync_playwright
 
 CDP_URL = os.getenv(
@@ -29,17 +29,11 @@ def start_openclaw_browser():
     try:
         if os.name == "nt":
             command = [
-                "cmd",
-                "/c",
-                "openclaw",
-                "browser",
-                "start",
+                "cmd", "/c", "openclaw", "browser", "start"
             ]
         else:
             command = [
-                "openclaw",
-                "browser",
-                "start",
+                "openclaw", "browser", "start"
             ]
 
         subprocess.run(
@@ -48,11 +42,74 @@ def start_openclaw_browser():
             capture_output=True,
             text=True,
         )
-
         return True
 
     except (subprocess.CalledProcessError, FileNotFoundError):
         print("Could not start OpenClaw browser.")
+        return False
+
+
+def connect_browser(p):
+    try:
+        return p.chromium.connect_over_cdp(CDP_URL)
+
+    except Exception:
+        print("Starting OpenClaw browser...")
+
+        if not start_openclaw_browser():
+            return None
+
+        for _ in range(20):
+            try:
+                return p.chromium.connect_over_cdp(CDP_URL)
+            except Exception:
+                time.sleep(1)
+
+        print("Could not connect to OpenClaw browser.")
+        return None
+
+
+def find_journal_page(browser, journal):
+    expected_path = JOURNALS[journal]["path"]
+
+    for context in browser.contexts:
+        for page in context.pages:
+            if (
+                "mc.manuscriptcentral.com" in page.url
+                and expected_path in page.url
+            ):
+                return page
+
+    return None
+
+
+def verify_logged_in(page):
+    try:
+        username_field = page.locator("#USERID")
+        password_field = page.locator("#PASSWORD")
+
+        # If the login form is visible, the user is logged out.
+        if (
+            username_field.count() > 0
+            and username_field.is_visible()
+        ):
+            return False
+
+        if (
+            password_field.count() > 0
+            and password_field.is_visible()
+        ):
+            return False
+
+        # Require an actual logged-in navigation element.
+        logout = page.get_by_text("Log Out", exact=True)
+
+        if logout.count() == 0 or not logout.first.is_visible():
+            return False
+
+        return True
+
+    except Exception:
         return False
 
 
@@ -64,10 +121,13 @@ def auto_login(journal="Marketing Science"):
     settings = JOURNALS[journal]
 
     username = keyring.get_password(
-        settings["service"], "username"
+        settings["service"],
+        "username",
     )
+
     password = keyring.get_password(
-        settings["service"], "password"
+        settings["service"],
+        "password",
     )
 
     if not username or not password:
@@ -76,54 +136,23 @@ def auto_login(journal="Marketing Science"):
 
     try:
         with sync_playwright() as p:
-            try:
-                browser = p.chromium.connect_over_cdp(CDP_URL)
+            browser = connect_browser(p)
 
-            except Exception:
-                print("Starting OpenClaw browser...")
+            if browser is None:
+                return False
 
-                if not start_openclaw_browser():
-                    return False
-
-                for _ in range(20):
-                    try:
-                        browser = p.chromium.connect_over_cdp(
-                            CDP_URL
-                        )
-                        break
-                    except Exception:
-                        time.sleep(1)
-                else:
-                    print("Could not connect to OpenClaw browser.")
-                    return False
-
-            pages = [
-                page
-                for context in browser.contexts
-                for page in context.pages
-            ]
-
-            page = next(
-                (
-                    pg for pg in pages
-                    if (
-                        "mc.manuscriptcentral.com"
-                        + settings["path"]
-                    ) in pg.url
-                ),
-                None,
-            )
+            page = find_journal_page(browser, journal)
 
             if page is None:
                 print(f"Opening {journal}...")
 
-                context = (
-                    browser.contexts[0]
-                    if browser.contexts
-                    else browser.new_context()
-                )
+                if browser.contexts:
+                    context = browser.contexts[0]
+                else:
+                    context = browser.new_context()
 
                 page = context.new_page()
+
                 page.goto(
                     settings["url"],
                     wait_until="domcontentloaded",
@@ -132,24 +161,45 @@ def auto_login(journal="Marketing Science"):
 
             page.wait_for_timeout(3000)
 
-            if not page.locator("#PASSWORD").is_visible():
-                if not page.locator("#USERID").is_visible():
-                    print(f"Already logged in to {journal}.")
-                    return True
+            username_field = page.locator("#USERID")
+            password_field = page.locator("#PASSWORD")
+            login_button = page.locator("#logInButton")
 
-                print("Login form not fully loaded.")
+            # First check whether the dashboard is already available.
+            if verify_logged_in(page):
+                print(f"Already logged in to {journal}.")
+                return True
+
+            # Confirm that the login form is available.
+            if (
+                username_field.count() == 0
+                or password_field.count() == 0
+                or login_button.count() == 0
+            ):
+                print(f"Login form not found for {journal}.")
+                return False
+
+            if (
+                not username_field.is_visible()
+                or not password_field.is_visible()
+                or not login_button.is_visible()
+            ):
+                print(f"Login form is not visible for {journal}.")
                 return False
 
             print(f"Logging in to {journal}...")
 
-            page.locator("#USERID").fill(username)
-            page.locator("#PASSWORD").fill(password)
-            page.locator("#logInButton").click()
+            username_field.fill(username)
+            password_field.fill(password)
+            login_button.click()
 
-            page.wait_for_timeout(7000)
-
-            if page.locator("#PASSWORD").is_visible():
-                print("Login not confirmed. Check the browser.")
+            # Wait for the dashboard rather than relying only
+            # on the disappearance of the password field.
+            if not verify_logged_in(page):
+                print(
+                    f"Login not confirmed for {journal}. "
+                    "Check the browser."
+                )
                 return False
 
             print(f"Login successful: {journal}.")

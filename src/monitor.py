@@ -3,13 +3,10 @@ import sys
 import json
 import subprocess
 import smtplib
-
 from datetime import datetime, timezone
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-
 from dotenv import load_dotenv
-from auto_login import auto_login
 
 from paths import (
     CONFIG_FILE,
@@ -24,7 +21,12 @@ load_dotenv(ENV_FILE)
 
 JOURNALS = [
     "Marketing Science",
-    "Journal of Marketing Research"
+    "Management Science",
+    "Journal of Marketing Research",
+    "Journal of Marketing",
+    "Journal of Consumer Research",
+    "Information Systems Research",
+    "Production and Operations Management"
 ]
 
 
@@ -113,16 +115,14 @@ def send_notification(
 
     body = f"""Hello,
 
-This paper titled '{manuscript['title']}' in the journal
-'{journal_name}' has changed its status from
-'{previous_status}' to '{new_status}'.
+This paper titled '{manuscript['title']}' in the journal '{journal_name}' has changed its status from '{previous_status}' to '{new_status}'.
 
 {duration_text}, from {previous_date_text} to {new_date_text}.
 
 Manuscript ID: {manuscript['manuscript_id']}
 
 Best,
-Manuscript Status Monitor
+Manuscript Monitor Agent
 """
 
     msg = MIMEMultipart()
@@ -177,11 +177,6 @@ def retrieve_all_browser_results():
 
         print(f"\nChecking {journal}...")
 
-        if not auto_login(journal):
-            raise RuntimeError(
-                f"Login failed for {journal}. "
-                "Monitoring stopped. Database was not modified."
-            )
 
         subprocess.run(
             [

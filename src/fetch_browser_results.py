@@ -4,73 +4,185 @@ import json
 import re
 import sys
 import os
-from pathlib import Path
-from playwright.async_api import async_playwright
+import keyring
 
+from playwright.async_api import (
+    async_playwright,
+    TimeoutError as PlaywrightTimeoutError,
+)
 from paths import RESULTS_FILE
+
 
 CDP_URL = os.getenv(
     "OPENCLAW_CDP_URL",
     "http://127.0.0.1:18800"
 )
 
+
 JOURNALS = {
-    "Marketing Science": "/mksc",
-    "Journal of Marketing Research": "/ama_jmr",
+    "Marketing Science": {
+        "service": "marketingscience-monitor",
+        "url": "https://mc.manuscriptcentral.com/mksc",
+    },
+    "Management Science": {
+        "service": "managementscience-monitor",
+        "url": "https://mc.manuscriptcentral.com/ms",
+    },
+    "Journal of Marketing Research": {
+        "service": "jmr-monitor",
+        "url": "https://mc.manuscriptcentral.com/ama_jmr",
+    },
+    "Journal of Marketing": {
+        "service": "journalofmarketing-monitor",
+        "url": "https://mc.manuscriptcentral.com/ama_jm",
+    },
+    "Journal of Consumer Research": {
+        "service": "jconres-monitor",
+        "url": "https://mc.manuscriptcentral.com/jconres",
+    },
+    "Information Systems Research": {
+        "service": "isr-monitor",
+        "url": "https://mc.manuscriptcentral.com/isr",
+    },
+    "International Journal of Research in Marketing": {
+        "service": "ijrm-monitor",
+        "url": "https://www.editorialmanager.com/ijrm",
+    },
+    "Production and Operations Management": {
+        "service": "poms-monitor",
+        "url": "https://mc.manuscriptcentral.com/poms",
+    },
 }
 
 
-async def find_scholarone_page(browser, journal):
-    expected_path = JOURNALS[journal]
+QUEUE_PATTERN = re.compile(
+    r"Manuscripts with Decisions|"
+    r"Submitted Manuscripts|"
+    r"Manuscripts I Have Co-Authored",
+    re.I,
+)
 
-    for context in browser.contexts:
-        for page in context.pages:
-            if (
-                "mc.manuscriptcentral.com" in page.url
-                and expected_path in page.url
-            ):
-                return page
 
-    raise RuntimeError(
-        f"No open ScholarOne tab found for {journal}."
+async def connect_browser(p):
+    try:
+        return await p.chromium.connect_over_cdp(CDP_URL)
+    except Exception as exc:
+        raise RuntimeError(
+            "Could not connect to OpenClaw browser. "
+            "Start it with: openclaw browser start"
+        ) from exc
+
+
+async def login(page, journal):
+    settings = JOURNALS[journal]
+
+    username = keyring.get_password(
+        settings["service"],
+        "username",
     )
+
+    password = keyring.get_password(
+        settings["service"],
+        "password",
+    )
+
+    if not username or not password:
+        raise RuntimeError(
+            f"Credentials missing for {journal} in Keychain."
+        )
+
+    print(f"Opening {journal} login page...")
+
+    await page.goto(
+        settings["url"],
+        wait_until="domcontentloaded",
+        timeout=60000,
+    )
+
+    username_field = page.locator("#USERID")
+    password_field = page.locator("#PASSWORD")
+    login_button = page.locator("#logInButton")
+
+    await username_field.wait_for(
+        state="visible",
+        timeout=30000,
+    )
+
+    await password_field.wait_for(
+        state="visible",
+        timeout=30000,
+    )
+
+    print(f"Logging in to {journal}...")
+
+    await username_field.fill(username)
+    await password_field.fill(password)
+    await login_button.click()
+
+    logout = page.get_by_text("Log Out", exact=True)
+
+    await logout.wait_for(
+        state="visible",
+        timeout=30000,
+    )
+
+    if await password_field.is_visible():
+        raise RuntimeError(
+            f"Login could not be verified for {journal}."
+        )
+
+    print(f"Login successful: {journal}.")
 
 
 async def ensure_author_menu(page):
-    decisions = page.get_by_role(
+    queue_links = page.get_by_role(
         "link",
-        name=re.compile(r"Manuscripts with Decisions", re.I),
+        name=QUEUE_PATTERN,
     )
 
-    if await decisions.count() == 0:
-        print("Opening Author menu...")
+    # Check whether any manuscript queue is already visible.
+    for i in range(await queue_links.count()):
+        if await queue_links.nth(i).is_visible():
+            return True
 
-        author = page.get_by_text("Author", exact=True).first
-        await author.click()
-        await page.wait_for_timeout(2000)
+    print("Opening Author menu...")
 
-    return page.get_by_role(
-        "link",
-        name=re.compile(r"Manuscripts with Decisions", re.I),
+    author = page.get_by_text(
+        "Author",
+        exact=True,
+    ).first
+
+    await author.wait_for(
+        state="visible",
+        timeout=15000,
     )
 
+    await author.click()
+    await page.wait_for_timeout(2000)
 
-async def open_queue(page, label, required=False):
-    """Navigate to a dashboard queue using its visible menu link."""
+    # Check whether at least one queue appeared.
+    for i in range(await queue_links.count()):
+        if await queue_links.nth(i).is_visible():
+            print("Author menu is ready.")
+            return True
 
-    await ensure_author_menu(page)
+    print("No manuscript queues found in Author menu.")
+    return False
+
+
+async def open_queue(page, label):
+    menu_ready = await ensure_author_menu(page)
+
+    if not menu_ready:
+        print(f"{label}: unavailable; skipping.")
+        return False
 
     link = page.get_by_role(
         "link",
         name=re.compile(re.escape(label), re.I),
     )
 
-    if await link.count() == 0:
-        if required:
-            raise RuntimeError(
-                f"Required queue not found: {label}"
-            )
-
+    if await link.count() == 0 or not await link.first.is_visible():
         print(f"{label}: tab not available; skipping.")
         return False
 
@@ -82,13 +194,20 @@ async def open_queue(page, label, required=False):
         print(f"{label}: already selected.")
     else:
         print(f"Opening {label}...")
+
         await link.first.click()
         await page.wait_for_timeout(4000)
 
-    await page.locator("#authorDashboardQueue").wait_for(
-        state="visible",
-        timeout=20000,
-    )
+    try:
+        await page.locator(
+            "#authorDashboardQueue"
+        ).wait_for(
+            state="visible",
+            timeout=20000,
+        )
+    except PlaywrightTimeoutError:
+        print(f"{label}: dashboard table unavailable; skipping.")
+        return False
 
     return True
 
@@ -109,7 +228,9 @@ async def set_page_size(page):
 async def scrape_current_table(page, source, journal):
     for attempt in range(5):
         try:
-            await page.locator("#authorDashboardQueue").wait_for(
+            await page.locator(
+                "#authorDashboardQueue"
+            ).wait_for(
                 state="visible",
                 timeout=15000,
             )
@@ -175,12 +296,16 @@ async def scrape_current_table(page, source, journal):
                         journal: args.journal
                     };
                 }).filter(Boolean)""",
-                {"source": source, "journal": journal},
+                {
+                    "source": source,
+                    "journal": journal,
+                },
             )
 
             print(
                 f"{source}: {len(records)} manuscripts found."
             )
+
             return records
 
         except Exception:
@@ -191,9 +316,101 @@ async def scrape_current_table(page, source, journal):
                 f"Table refresh detected "
                 f"(attempt {attempt + 1}/5). Retrying..."
             )
+
             await page.wait_for_timeout(3000)
 
     return []
+
+
+async def scrape_journal(page, journal):
+    all_records = []
+    available_queues = 0
+
+    # 1. Manuscripts with Decisions
+    if await open_queue(
+        page,
+        "Manuscripts with Decisions",
+    ):
+        available_queues += 1
+
+        author_records = await scrape_current_table(
+            page,
+            "Manuscripts with Decisions",
+            journal,
+        )
+
+        all_records.extend(author_records)
+
+    # 2. Submitted Manuscripts
+    if await open_queue(
+        page,
+        "Submitted Manuscripts",
+    ):
+        available_queues += 1
+
+        submitted_records = await scrape_current_table(
+            page,
+            "Submitted Manuscripts",
+            journal,
+        )
+
+        all_records.extend(submitted_records)
+
+    # 3. Co-Authored Manuscripts
+    if await open_queue(
+        page,
+        "Manuscripts I Have Co-Authored",
+    ):
+        available_queues += 1
+
+        coauthored_records = await scrape_current_table(
+            page,
+            "Co-Authored",
+            journal,
+        )
+
+        all_records.extend(coauthored_records)
+
+    # Do not save results if all queues are unavailable.
+    if available_queues == 0:
+        raise RuntimeError(
+            f"No manuscript queues were accessible for {journal}. "
+            "Results were not saved."
+        )
+
+    # Remove duplicate manuscript IDs.
+    combined = []
+    seen_ids = set()
+
+    for record in all_records:
+        manuscript_id = record["manuscript_id"]
+
+        if manuscript_id not in seen_ids:
+            combined.append(record)
+            seen_ids.add(manuscript_id)
+
+    RESULTS_FILE.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    with open(
+        RESULTS_FILE,
+        "w",
+        encoding="utf-8",
+    ) as f:
+        json.dump(
+            combined,
+            f,
+            indent=4,
+            ensure_ascii=False,
+        )
+
+    print()
+    print(f"Journal: {journal}")
+    print(f"Available queues: {available_queues}")
+    print(f"Combined unique manuscripts: {len(combined)}")
+    print(f"Saved to: {RESULTS_FILE}")
 
 
 async def main():
@@ -210,104 +427,25 @@ async def main():
         )
 
     async with async_playwright() as p:
-        browser = await p.chromium.connect_over_cdp(CDP_URL)
+        browser = await connect_browser(p)
 
-        page = await find_scholarone_page(browser, journal)
-
-        print(f"ScholarOne tab found: {journal}")
-
-        # Required queue
-        await open_queue(
-            page,
-            "Manuscripts with Decisions",
-            required=True,
-        )
-
-        author_records = await scrape_current_table(
-            page,
-            "Manuscripts with Decisions",
-            journal,
-        )
-
-        # Optional queue
-        submitted_records = []
-
-        if await open_queue(
-            page,
-            "Submitted Manuscripts",
-        ):
-            submitted_records = await scrape_current_table(
-                page,
-                "Submitted Manuscripts",
-                journal,
+        if not browser.contexts:
+            raise RuntimeError(
+                "OpenClaw browser has no available browser context."
             )
 
-        # Optional queue
-        coauthored_records = []
+        context = browser.contexts[0]
+        page = await context.new_page()
 
-        if await open_queue(
-            page,
-            "Manuscripts I Have Co-Authored",
-        ):
-            coauthored_records = await scrape_current_table(
-                page,
-                "Co-Authored",
-                journal,
-            )
+        try:
+            await login(page, journal)
+            await scrape_journal(page, journal)
 
-        # Deduplicate by manuscript ID within this journal.
-        combined = []
-        seen_ids = set()
-
-        all_records = (
-            author_records
-            + submitted_records
-            + coauthored_records
-        )
-
-        for record in all_records:
-            manuscript_id = record["manuscript_id"]
-
-            if manuscript_id not in seen_ids:
-                combined.append(record)
-                seen_ids.add(manuscript_id)
-
-        RESULTS_FILE.parent.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
-        with open(
-            RESULTS_FILE,
-            "w",
-            encoding="utf-8",
-        ) as f:
-            json.dump(
-                combined,
-                f,
-                indent=4,
-                ensure_ascii=False,
-            )
-
-        print()
-        print(f"Journal: {journal}")
-        print(
-            f"Manuscripts with Decisions: "
-            f"{len(author_records)}"
-        )
-        print(
-            f"Submitted Manuscripts: "
-            f"{len(submitted_records)}"
-        )
-        print(
-            f"Co-Authored: "
-            f"{len(coauthored_records)}"
-        )
-        print(
-            f"Combined unique manuscripts: "
-            f"{len(combined)}"
-        )
-        print(f"Saved to: {RESULTS_FILE}")
+        finally:
+            if not page.is_closed():
+                print(f"\nClosing {journal} tab...")
+                await page.close()
+                print("Tab closed.")
 
 
 if __name__ == "__main__":
