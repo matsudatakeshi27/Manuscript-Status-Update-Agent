@@ -165,18 +165,21 @@ Manuscript Monitor Agent
                 pass
 
 
+
 def retrieve_all_browser_results():
     """
-    Retrieve results from both journals before modifying the database.
-    If either journal fails, stop the monitoring run.
+    Retrieve results from all seven ScholarOne journals
+    and IJRM before modifying the database.
+
+    If any scraper fails, stop the monitoring run.
     """
 
     all_manuscripts = []
 
+    # Run the seven ScholarOne scrapers.
     for journal in JOURNALS:
 
         print(f"\nChecking {journal}...")
-
 
         subprocess.run(
             [
@@ -190,38 +193,10 @@ def retrieve_all_browser_results():
 
         journal_results = load_json(RESULTS_FILE)
 
-        if not isinstance(journal_results, list):
-            raise ValueError(
-                f"Invalid browser results for {journal}."
-            )
-
-        if not journal_results:
-            raise ValueError(
-                f"No manuscripts retrieved for {journal}. "
-                "Database was not modified."
-            )
-
-        for item in journal_results:
-
-            if not isinstance(item, dict):
-                raise ValueError(
-                    f"Invalid record returned by {journal}."
-                )
-
-            if not all([
-                item.get("manuscript_id"),
-                item.get("title"),
-                item.get("status")
-            ]):
-                raise ValueError(
-                    f"Incomplete manuscript record from {journal}."
-                )
-
-            if item.get("journal") != journal:
-                raise ValueError(
-                    f"Journal mismatch in browser results for {journal}. "
-                    "Database was not modified."
-                )
+        validate_journal_results(
+            journal_results,
+            journal
+        )
 
         print(
             f"Manuscripts retrieved from {journal}: "
@@ -230,12 +205,76 @@ def retrieve_all_browser_results():
 
         all_manuscripts.extend(journal_results)
 
+    # Run the separate IJRM scraper.
+    ijrm_name = "International Journal of Research in Marketing"
+
+    print(f"\nChecking {ijrm_name}...")
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(APP_DIR / "fetch_ijrm_results.py")
+        ],
+        cwd=str(APP_DIR.parent),
+        check=True
+    )
+
+    ijrm_results = load_json(RESULTS_FILE)
+
+    validate_journal_results(
+        ijrm_results,
+        ijrm_name
+    )
+
+    print(
+        f"Manuscripts retrieved from {ijrm_name}: "
+        f"{len(ijrm_results)}"
+    )
+
+    all_manuscripts.extend(ijrm_results)
+
     print(
         f"\nTotal manuscripts retrieved: "
         f"{len(all_manuscripts)}"
     )
 
     return all_manuscripts
+
+
+def validate_journal_results(journal_results, journal):
+    if not isinstance(journal_results, list):
+        raise ValueError(
+            f"Invalid browser results for {journal}."
+        )
+
+    if not journal_results:
+        raise ValueError(
+            f"No manuscripts retrieved for {journal}. "
+            "Database was not modified."
+        )
+
+    for item in journal_results:
+
+        if not isinstance(item, dict):
+            raise ValueError(
+                f"Invalid record returned by {journal}."
+            )
+
+        if not all([
+            item.get("manuscript_id"),
+            item.get("title"),
+            item.get("status")
+        ]):
+            raise ValueError(
+                f"Incomplete manuscript record from {journal}."
+            )
+
+        if item.get("journal") != journal:
+            raise ValueError(
+                f"Journal mismatch in browser results for "
+                f"{journal}. Database was not modified."
+            )
+
 
 
 def process_browser_results():
