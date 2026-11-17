@@ -86,9 +86,9 @@ Other modules, such as `json`, `os`, `datetime`, and `smtplib`, are included in 
 Manuscript-Status-Update-Agent/
 │
 ├── src/
-│   ├── auto_login.py
 │   ├── configure_schedule.py
 │   ├── fetch_browser_results.py
+│   ├── fetch_ijmr_results.py
 │   ├── monitor.py
 │   ├── paths.py
 │   └── setup_credentials.py
@@ -107,8 +107,8 @@ Manuscript-Status-Update-Agent/
 | File                       | Description                                                                                                       |
 | -------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `monitor.py`               | Main entry point. Coordinates manuscript retrieval, status comparison, database updates, and email notifications. |
-| `auto_login.py`            | Retrieves saved ScholarOne credentials and logs in using Playwright.                                              |
-| `fetch_browser_results.py` | Connects to the OpenClaw browser through CDP and retrieves manuscript information.                                |
+| `fetch_browser_results.py` | Connects to the OpenClaw browser through CDP and retrieves manuscript information from ScholarOne.                                |
+| `fetch_ijmr_results.py`    | Connects to the OpenClaw browser through CDP and retrieves manuscript information from IJMR.                                |
 | `paths.py`                 | Defines application-data and log locations using `platformdirs`.                                                  |
 | `setup_credentials.py`     | Prompts for ScholarOne credentials and saves them using Python Keyring.                                           |
 | `configure_schedule.py`    | Configures automatic monitoring on macOS using LaunchAgent.                                                       |
