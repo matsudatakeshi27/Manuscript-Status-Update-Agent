@@ -128,6 +128,33 @@ The Windows scripts are experimental and have not yet been tested on a Windows m
 
 ## 5. Installation
 
+## Updating the Application
+
+If you have already cloned the repository and want to download the latest version of the application, open Terminal and navigate to the project directory:
+
+```bash
+cd Manuscript-Status-Update-Agent
+```
+
+Pull the latest changes from GitHub:
+
+```bash
+git pull
+```
+
+This updates your local project files with the latest version from the repository.
+
+**Important notes:**
+
+- If you cloned the repository into a different directory, navigate to that directory instead.
+- If you have uncommitted local changes, commit or back them up before pulling updates.
+- Your ScholarOne credentials, Gmail settings, manuscript database, and monitoring configuration are stored separately from the repository. Updating the code does not normally require setting them up again.
+- If an update changes Python dependencies, install the updated requirements:
+
+```bash
+pip install -r requirements.txt
+```
+
 ### 5.1. Prerequisites
 
 Install the following before setting up the application:
