@@ -3,6 +3,9 @@ import sys
 import json
 import subprocess
 import smtplib
+import time
+import urllib.request
+import shutil
 from datetime import datetime, timezone
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -468,7 +471,76 @@ def process_browser_results():
     print("Monitoring completed.")
 
 
+
+def ensure_openclaw_browser():
+    """Ensure the OpenClaw browser is running before monitoring."""
+
+    import shutil
+    import time
+    import urllib.request
+
+    cdp_url = "http://127.0.0.1:18800/json/version"
+
+    def browser_is_available():
+        try:
+            with urllib.request.urlopen(cdp_url, timeout=3):
+                return True
+        except Exception:
+            return False
+
+    # Check whether OpenClaw browser is already running.
+    if browser_is_available():
+        print("OpenClaw browser is already running.")
+        return
+
+    print("OpenClaw browser is not running. Starting it...")
+
+    # Find OpenClaw CLI on this machine.
+    openclaw_path = shutil.which("openclaw")
+
+    if not openclaw_path:
+        raise RuntimeError(
+            "OpenClaw CLI not found. Install OpenClaw "
+            "and make sure it is available in PATH."
+        )
+
+    try:
+        result = subprocess.run(
+            [
+                openclaw_path,
+                "browser",
+                "--browser-profile",
+                "openclaw",
+                "start"
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        if result.returncode != 0:
+            print("OpenClaw startup command returned an error:")
+            print(result.stderr or result.stdout)
+
+    except subprocess.TimeoutExpired:
+        print("Browser startup command timed out. Checking connection...")
+
+    # Wait up to 60 seconds for the browser to become available.
+    for _ in range(60):
+        if browser_is_available():
+            print("OpenClaw browser started successfully.")
+            return
+
+        time.sleep(1)
+
+    raise RuntimeError(
+        "Could not start OpenClaw browser. Check that OpenClaw "
+        "is installed, configured, and its gateway is running."
+    )
+
+
 def main():
+    ensure_openclaw_browser()
     process_browser_results()
 
 
