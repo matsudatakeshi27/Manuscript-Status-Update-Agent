@@ -515,6 +515,77 @@ The monitoring interval is controlled by:
 
 The browser and OpenClaw must be available when the scheduled task runs. On Windows, the task is configured to run while the user is logged in.
 
+### Verify Automatic Monitoring
+
+After configuring the LaunchAgent, verify that automatic monitoring is running.
+
+**Step 1. Check whether the LaunchAgent is loaded**
+
+Open Terminal and run:
+
+```bash
+launchctl list | grep -i scholarone
+```
+
+If the LaunchAgent is loaded, you should see an entry similar to:
+
+```text
+-    0    com.scholarone.monitor.downloadable
+```
+
+If no output appears, the LaunchAgent may not be loaded.
+
+**Step 2. Inspect the LaunchAgent**
+
+Run:
+
+```bash
+launchctl print gui/$(id -u)/com.scholarone.monitor.downloadable
+```
+
+Check the output for:
+- `state`: Current LaunchAgent state.
+- `runs`: Number of times the job has run.
+- `last exit code`: Exit status of the most recent execution.
+
+An exit code of `0` indicates that the most recent execution completed successfully.
+
+**Step 3. Verify the monitoring interval**
+
+Run:
+
+```bash
+grep -A 1 -B 1 StartInterval ~/Library/LaunchAgents/com.scholarone.monitor.downloadable.plist
+```
+
+For a six-hour monitoring interval, the configured value should be:
+
+```text
+21600
+```
+
+**Step 4. Check the monitoring logs**
+
+To inspect recent activity, run:
+
+```bash
+tail -30 "$HOME/Library/Application Support/ScholarOneMonitor/logs/monitor.log"
+```
+
+To inspect errors, run:
+
+```bash
+tail -30 "$HOME/Library/Application Support/ScholarOneMonitor/logs/monitor_error.log"
+```
+
+**Important notes:**
+- `launchctl list` confirms that the LaunchAgent is loaded; it does not guarantee that the latest monitoring run succeeded.
+- The monitoring interval is six hours (21,600 seconds) by default.
+- Your Mac must be powered on and the required OpenClaw browser connection must be available when the scheduled task runs.
+- All `launchctl` commands can be executed from any Terminal directory.
+
+
+
 ## 9. Troubleshooting
 
 **OpenClaw browser connection fails**
