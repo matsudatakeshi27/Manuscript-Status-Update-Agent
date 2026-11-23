@@ -611,7 +611,53 @@ tail -30 "$HOME/Library/Application Support/ScholarOneMonitor/logs/monitor_error
 - Your Mac must be powered on and the required OpenClaw browser connection must be available when the scheduled task runs.
 - All `launchctl` commands can be executed from any Terminal directory.
 
+### Managing the LaunchAgent (macOS)
 
+You can stop, start, or restart automatic monitoring using the following commands.
+
+**Stop automatic monitoring**
+
+```bash
+launchctl bootout gui/$(id -u)/com.scholarone.monitor.downloadable
+```
+
+This unloads the LaunchAgent and stops future scheduled runs. It does not delete your configuration, manuscript database, or logs.
+
+**Start automatic monitoring**
+
+```bash
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.scholarone.monitor.downloadable.plist
+```
+
+This loads the LaunchAgent and enables automatic monitoring according to the configured interval.
+
+**Restart automatic monitoring**
+
+If you have updated the application or changed the LaunchAgent configuration, restart it by running:
+
+```bash
+launchctl bootout gui/$(id -u)/com.scholarone.monitor.downloadable
+
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.scholarone.monitor.downloadable.plist
+```
+
+**Check LaunchAgent status**
+
+```bash
+launchctl list | grep -i scholarone
+```
+
+If loaded, you should see an entry similar to:
+
+```text
+-    0    com.scholarone.monitor.downloadable
+```
+
+**Important notes:**
+
+- Stopping the LaunchAgent does not delete any application data.
+- Starting or restarting the LaunchAgent does not necessarily trigger an immediate monitoring run. The next run follows the configured schedule.
+- These commands apply to the macOS LaunchAgent. Windows users should manage the scheduled task through Windows Task Scheduler.
 
 ## 9. Troubleshooting
 
