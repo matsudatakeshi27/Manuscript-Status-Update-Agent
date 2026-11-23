@@ -73,6 +73,42 @@ async def connect_browser(p):
         ) from exc
 
 
+async def accept_cookies(page):
+    """Accept a visible cookie banner when one is present."""
+    print("Checking for cookie consent banner...")
+
+    selectors = [
+        "#onetrust-accept-btn-handler",
+        'button:has-text("Accept All Cookies")',
+        'button:has-text("Accept all")',
+    ]
+
+    for selector in selectors:
+        try:
+            button = page.locator(selector).first
+
+            if await button.count() and await button.is_visible():
+                await button.evaluate(
+                    "(element) => element.click()"
+                )
+                print("Cookie consent accepted.")
+                await page.wait_for_timeout(1500)
+                return
+
+        except Exception:
+            continue
+
+    overlay = page.locator(".onetrust-pc-dark-filter")
+
+    if await overlay.count() and await overlay.first.is_visible():
+        raise RuntimeError(
+            "Cookie consent overlay is still visible, "
+            "but no supported accept button was found."
+        )
+
+    print("No active cookie consent overlay found.")
+
+
 async def login(page, journal):
     settings = JOURNALS[journal]
 
@@ -98,6 +134,8 @@ async def login(page, journal):
         wait_until="domcontentloaded",
         timeout=60000,
     )
+
+    await accept_cookies(page)
 
     username_field = page.locator("#USERID")
     password_field = page.locator("#PASSWORD")
@@ -140,7 +178,6 @@ async def ensure_author_menu(page):
         name=QUEUE_PATTERN,
     )
 
-    # Check whether any manuscript queue is already visible.
     for i in range(await queue_links.count()):
         if await queue_links.nth(i).is_visible():
             return True
@@ -160,7 +197,6 @@ async def ensure_author_menu(page):
     await author.click()
     await page.wait_for_timeout(2000)
 
-    # Check whether at least one queue appeared.
     for i in range(await queue_links.count()):
         if await queue_links.nth(i).is_visible():
             print("Author menu is ready.")
@@ -326,7 +362,6 @@ async def scrape_journal(page, journal):
     all_records = []
     available_queues = 0
 
-    # 1. Manuscripts with Decisions
     if await open_queue(
         page,
         "Manuscripts with Decisions",
@@ -341,7 +376,6 @@ async def scrape_journal(page, journal):
 
         all_records.extend(author_records)
 
-    # 2. Submitted Manuscripts
     if await open_queue(
         page,
         "Submitted Manuscripts",
@@ -356,7 +390,6 @@ async def scrape_journal(page, journal):
 
         all_records.extend(submitted_records)
 
-    # 3. Co-Authored Manuscripts
     if await open_queue(
         page,
         "Manuscripts I Have Co-Authored",
@@ -371,14 +404,12 @@ async def scrape_journal(page, journal):
 
         all_records.extend(coauthored_records)
 
-    # Do not save results if all queues are unavailable.
     if available_queues == 0:
         raise RuntimeError(
             f"No manuscript queues were accessible for {journal}. "
             "Results were not saved."
         )
 
-    # Remove duplicate manuscript IDs.
     combined = []
     seen_ids = set()
 

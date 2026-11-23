@@ -168,7 +168,6 @@ Manuscript Monitor Agent
                 pass
 
 
-
 def retrieve_all_browser_results():
     """
     Retrieve results from all seven ScholarOne journals
@@ -208,7 +207,7 @@ def retrieve_all_browser_results():
 
         all_manuscripts.extend(journal_results)
 
-    # Run the separate IJRM scraper.
+    # Run the separate IJRM Editorial Manager scraper.
     ijrm_name = "International Journal of Research in Marketing"
 
     print(f"\nChecking {ijrm_name}...")
@@ -242,6 +241,7 @@ def retrieve_all_browser_results():
     )
 
     return all_manuscripts
+
 
 
 def validate_journal_results(journal_results, journal):
@@ -291,7 +291,7 @@ def process_browser_results():
 
     print("Starting manuscript monitoring...")
 
-    # Retrieve both journals before touching the database.
+    # Retrieve all eight journals before touching the database.
     new_manuscripts = retrieve_all_browser_results()
 
     manuscripts = load_json(DATABASE_FILE)

@@ -3,6 +3,9 @@ import json
 import os
 import re
 import sys
+import time
+import subprocess
+
 from datetime import datetime
 from urllib.parse import (
     urljoin,
@@ -13,7 +16,8 @@ from urllib.parse import (
 )
 
 import keyring
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+
+from playwright.sync_api import sync_playwright
 
 
 CDP_URL = os.getenv(
@@ -40,6 +44,7 @@ def get_credentials():
     username = keyring.get_password(
         KEYRING_SERVICE, "username"
     )
+
     password = keyring.get_password(
         KEYRING_SERVICE, "password"
     )
@@ -57,14 +62,82 @@ def get_credentials():
 # --------------------------------------------------
 
 def connect_browser(p):
-    try:
-        return p.chromium.connect_over_cdp(CDP_URL)
+    """
+    Connect to the OpenClaw browser.
 
-    except Exception as exc:
+    If OpenClaw is not running, start it and retry
+    the CDP connection for up to 60 seconds.
+    """
+
+    print("\nConnecting to OpenClaw browser...")
+
+    # First, try connecting to an existing browser.
+    try:
+        browser = p.chromium.connect_over_cdp(
+            CDP_URL,
+            timeout=5000
+        )
+
+        print("Connected to existing OpenClaw browser.")
+        return browser
+
+    except Exception:
+        print("OpenClaw browser is not reachable.")
+
+    # Start OpenClaw browser.
+    print("\nStarting OpenClaw browser...")
+
+    try:
+        result = subprocess.run(
+            ["openclaw", "browser", "start"],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        if result.stdout.strip():
+            print(result.stdout.strip())
+
+        if result.stderr.strip():
+            print(result.stderr.strip())
+
+    except FileNotFoundError as exc:
         raise RuntimeError(
-            "Could not connect to OpenClaw browser. "
-            "Start it with: openclaw browser start"
+            "Could not find the openclaw command. "
+            "Make sure OpenClaw is installed and available "
+            "in the PATH used by this Python process."
         ) from exc
+
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            "The OpenClaw browser start command timed out."
+        ) from exc
+
+    # Retry the connection.
+    print("\nWaiting for OpenClaw browser to become available...")
+
+    deadline = time.monotonic() + 60
+    last_error = None
+
+    while time.monotonic() < deadline:
+        try:
+            browser = p.chromium.connect_over_cdp(
+                CDP_URL,
+                timeout=5000
+            )
+
+            print("Successfully connected to OpenClaw browser.")
+            return browser
+
+        except Exception as exc:
+            last_error = exc
+            time.sleep(2)
+
+    raise RuntimeError(
+        "Could not connect to OpenClaw browser after "
+        "starting it and retrying for 60 seconds. "
+        f"Last error: {last_error}"
+    )
 
 
 # --------------------------------------------------
@@ -86,6 +159,7 @@ def print_login_diagnostics(page):
         'input[name="authorLogin"]',
     ):
         locator = page.locator(selector)
+
         print(
             f"{selector}: "
             f"count={locator.count()}, "
@@ -93,6 +167,7 @@ def print_login_diagnostics(page):
         )
 
     inputs = page.locator("input")
+
     print("\nVisible input fields:")
 
     for i in range(inputs.count()):
@@ -112,6 +187,48 @@ def print_login_diagnostics(page):
 # --------------------------------------------------
 
 
+def accept_cookies(page):
+    print("\nChecking for cookie consent banner...")
+
+    for frame in page.frames:
+        try:
+            # Try the OneTrust accept button.
+            button = frame.locator("#onetrust-accept-btn-handler")
+
+            if button.count() and button.first.is_visible():
+                button.first.evaluate("(element) => element.click()")
+                print("Accepted cookies using OneTrust button.")
+                page.wait_for_timeout(2000)
+                return
+
+            # Fallback: find the button by its text.
+            button = frame.get_by_role(
+                "button",
+                name=re.compile(r"accept all cookies", re.IGNORECASE)
+            )
+
+            if button.count() and button.first.is_visible():
+                button.first.evaluate("(element) => element.click()")
+                print("Accepted cookies using button text.")
+                page.wait_for_timeout(2000)
+                return
+
+        except Exception as exc:
+            print(f"Cookie handler check: {exc}")
+            continue
+
+    # Check whether the overlay is still visible.
+    overlay = page.locator(".onetrust-pc-dark-filter")
+
+    if overlay.count() and overlay.first.is_visible():
+        raise RuntimeError(
+            "Cookie consent overlay is still visible. "
+            "Cannot safely proceed with IJRM login."
+        )
+
+    print("No active cookie consent overlay found.")
+
+
 def login(page, username, password):
     print("\nOpening IJRM Editorial Manager...")
 
@@ -122,6 +239,8 @@ def login(page, username, password):
     )
 
     page.wait_for_timeout(4000)
+
+    accept_cookies(page)
 
     print("Page title:", page.title())
 
@@ -158,7 +277,6 @@ def login(page, username, password):
     if logged_in:
         print("Already logged in.")
 
-        # Return to the Author Main Menu.
         main_menu_link = page.get_by_role(
             "link",
             name="Main Menu",
@@ -171,7 +289,6 @@ def login(page, username, password):
             )
 
         main_menu_link.first.click()
-
         page.wait_for_timeout(3000)
 
         dashboard_frame = find_dashboard()
@@ -262,10 +379,11 @@ def login(page, username, password):
         "Login was submitted, but the Author dashboard "
         "did not appear."
     )
+
+
 # --------------------------------------------------
 # DISCOVER MANUSCRIPT QUEUES
 # --------------------------------------------------
-
 
 def discover_queues(frame):
     print("\nDiscovering available IJRM manuscript queues...")
@@ -316,6 +434,7 @@ def discover_queues(frame):
                 "name": name,
                 "url": queue_url
             })
+
             seen.add(queue_url)
 
     for queue in queues:
@@ -488,7 +607,6 @@ def set_page_number(url, page_number):
 # SCRAPE EACH QUEUE
 # --------------------------------------------------
 
-
 def scrape_queue(frame, queue):
     queue_name = queue["name"]
     queue_url = queue["url"]
@@ -584,9 +702,7 @@ def save_results(records):
         )
 
     print("\nIJRM scraping completed.")
-    print(
-        f"Unique manuscripts: {len(unique_records)}"
-    )
+    print(f"Unique manuscripts: {len(unique_records)}")
     print(f"Saved to: {RESULTS_FILE}")
 
 
@@ -600,10 +716,10 @@ def main():
     with sync_playwright() as p:
         browser = connect_browser(p)
 
-        # Use the existing browser context and open a new tab.
         if not browser.contexts:
             raise RuntimeError(
-                "No browser context found. Check connect_browser()."
+                "No browser context found. "
+                "Check the OpenClaw browser connection."
             )
 
         context = browser.contexts[0]
@@ -653,7 +769,7 @@ def main():
 if __name__ == "__main__":
     try:
         main()
+
     except Exception as e:
         print(f"IJRM monitoring failed: {e}")
         raise
-
